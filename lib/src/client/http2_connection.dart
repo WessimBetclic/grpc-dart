@@ -115,10 +115,21 @@ class Http2ClientConnection implements connection.ClientConnection {
               options: options.keepAlive,
               ping: () {
                 if (transport.isOpen) {
-                  transport.ping();
+                  // The keepalive tracks ping health through its own timers,
+                  // never through this future. terminate() fails it when the
+                  // transport goes down mid-ping, which would otherwise surface
+                  // as an unhandled async error.
+                  transport.ping().ignore();
                 }
               },
-              onPingTimeout: () => transport.finish(),
+              // terminate(), not finish(): finish() only refuses new streams
+              // and waits for the active ones to end, which on a silently
+              // partitioned connection they never do, so the calls bound to
+              // the dead transport hang until the OS gives up on TCP. The
+              // keepalive spec declares the connection dead at this point and
+              // C-core closes the transport; terminate() fails the bound calls
+              // at once and the channel reconnects on the next call.
+              onPingTimeout: () => transport.terminate(),
             );
             transport.onFrameReceived.listen(
               (_) => keepAliveManager?.onFrameReceived(),
