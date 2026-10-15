@@ -1,3 +1,11 @@
+## 5.1.0 (Betclic fork)
+
+- Terminate the transport when a keepalive ping times out, instead of finishing
+  it: a graceful finish never ends the calls bound to a silently dead
+  connection, so they hung until the OS gave up on TCP. Pending keepalive pings
+  no longer surface an unhandled error when the transport is terminated
+  (grpc/grpc-dart#845).
+
 ## 5.1.0
 
 - Added `protos.dart` library.
