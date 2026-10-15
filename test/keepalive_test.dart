@@ -120,6 +120,33 @@ void main() {
       expect(unresponsiveChannel.newConnectionCounter, 2);
     },
   );
+
+  test(
+    'Server doesnt ack the ping, making the client fail the calls still bound '
+    'to the transport',
+    () async {
+      // A long-lived server stream, as a live subscription would be.
+      final firstResponse = Completer<void>();
+      Object? failure;
+      unresponsiveClient
+          .serverStreamingEcho(ServerStreamingEchoRequest())
+          .listen(
+            (_) {
+              if (!firstResponse.isCompleted) firstResponse.complete();
+            },
+            onError: (Object error) => failure ??= error,
+            cancelOnError: false,
+          );
+      await firstResponse.future;
+
+      //Ping is not being acked on time
+      await Future.delayed(timeout * 2);
+
+      // The stream is bound to the transport the keepalive declared dead:
+      // it must fail rather than wait for an answer that cannot come.
+      expect(failure, isA<GrpcError>());
+    },
+  );
 }
 
 /// A wrapper around a [FakeHttp2ClientConnection]
@@ -208,9 +235,13 @@ class FakeEchoService extends EchoServiceBase {
   Future<EchoResponse> echo(ServiceCall call, EchoRequest request) async =>
       EchoResponse(message: 'Echo messsage');
 
+  /// Answers once and then stays open, as a live subscription does.
   @override
   Stream<ServerStreamingEchoResponse> serverStreamingEcho(
     ServiceCall call,
     ServerStreamingEchoRequest request,
-  ) => throw UnsupportedError('Not used in this test');
+  ) async* {
+    yield ServerStreamingEchoResponse(message: 'Echo message');
+    await Completer<void>().future;
+  }
 }
