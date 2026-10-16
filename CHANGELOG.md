@@ -8,6 +8,8 @@
 - The keepalive pings a transport that cannot open a stream, so a draining
   transport or one at the peer's concurrent-stream limit is declared dead only
   when it stops answering.
+- `ClientKeepAliveOptions.onPingTimeout` reports a keepalive timeout to the
+  channel owner, which has no other way to observe one.
 
 ## 5.2.0
 

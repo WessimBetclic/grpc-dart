@@ -38,8 +38,10 @@ void main() {
   final pingInterval = Duration(milliseconds: 10);
   final timeout = Duration(milliseconds: 30);
   final maxBadPings = 5;
+  var pingTimeouts = 0;
 
   setUp(() async {
+    pingTimeouts = 0;
     final serverOptions = ServerKeepAliveOptions(
       maxBadPings: maxBadPings,
       minIntervalBetweenPingsWithoutData: Duration(milliseconds: 10),
@@ -48,6 +50,7 @@ void main() {
       pingInterval: pingInterval,
       timeout: timeout,
       permitWithoutCalls: true,
+      onPingTimeout: () => pingTimeouts++,
     );
 
     server = Server.create(
@@ -103,6 +106,7 @@ void main() {
 
       // Check that the server never closed the connection
       expect(fakeChannel.newConnectionCounter, 1);
+      expect(pingTimeouts, 0);
     },
   );
 
@@ -146,6 +150,7 @@ void main() {
       // The stream is bound to the transport the keepalive declared dead:
       // it must fail rather than wait for an answer that cannot come.
       expect(failure, isA<GrpcError>());
+      expect(pingTimeouts, 1);
     },
   );
 
@@ -187,6 +192,7 @@ void main() {
       await Future.delayed(timeout * 3);
 
       expect(failure, isNull);
+      expect(pingTimeouts, 0);
       await channel.terminate();
       await lenientServer.shutdown();
     },

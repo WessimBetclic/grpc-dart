@@ -40,10 +40,15 @@ class ClientKeepAliveOptions {
   /// `GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS` in the docs.
   final bool permitWithoutCalls;
 
+  /// Called when a ping goes unanswered for [timeout], just before the
+  /// transport is terminated and the calls bound to it fail.
+  final void Function()? onPingTimeout;
+
   const ClientKeepAliveOptions({
     this.pingInterval,
     this.timeout = const Duration(seconds: 20),
     this.permitWithoutCalls = false,
+    this.onPingTimeout,
   });
 
   bool get shouldSendPings => pingInterval != null;
