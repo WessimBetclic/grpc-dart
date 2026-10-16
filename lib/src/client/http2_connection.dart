@@ -127,7 +127,10 @@ class Http2ClientConnection implements connection.ClientConnection {
               // keepalive spec declares the connection dead at this point and
               // C-core closes the transport; terminate() fails the bound calls
               // at once and the channel reconnects on the next call.
-              onPingTimeout: () => transport.terminate(),
+              onPingTimeout: () {
+                options.keepAlive.onPingTimeout?.call();
+                transport.terminate();
+              },
             );
             transport.onFrameReceived.listen(
               (_) => keepAliveManager?.onFrameReceived(),
