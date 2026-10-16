@@ -4,6 +4,9 @@
   it: a graceful finish never ends the calls bound to a silently dead
   connection, so they hung until the OS gave up on TCP. Pending keepalive pings
   no longer surface an unhandled error when the transport is terminated.
+- The keepalive pings a transport that cannot open a stream, so a draining
+  transport or one at the peer's concurrent-stream limit is declared dead only
+  when it stops answering.
 
 ## 5.2.0
 
