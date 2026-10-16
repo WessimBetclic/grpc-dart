@@ -113,15 +113,13 @@ class Http2ClientConnection implements connection.ClientConnection {
           if (options.keepAlive.shouldSendPings) {
             keepAliveManager = ClientKeepAlive(
               options: options.keepAlive,
-              ping: () {
-                if (transport.isOpen) {
-                  // The keepalive tracks ping health through its own timers,
-                  // never through this future. terminate() fails it when the
-                  // transport goes down mid-ping, which would otherwise surface
-                  // as an unhandled async error.
-                  transport.ping().ignore();
-                }
-              },
+              // Pinged whether or not it can open a stream: a transport being
+              // finished, or at the peer's concurrent-stream limit, still
+              // answers, and skipping the ping would let the timeout declare
+              // it dead. Only a terminated transport refuses, and that error
+              // is ignored since the keepalive tracks ping health through its
+              // own timers, never through this future.
+              ping: () => transport.ping().ignore(),
               // terminate(), not finish(): finish() only refuses new streams
               // and waits for the active ones to end, which on a silently
               // partitioned connection they never do, so the calls bound to
