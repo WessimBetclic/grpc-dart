@@ -5,6 +5,9 @@
   connection, so they hung until the OS gave up on TCP. Pending keepalive pings
   no longer surface an unhandled error when the transport is terminated
   (grpc/grpc-dart#845).
+- The keepalive pings a transport that cannot open a stream, so a draining
+  transport or one at the peer's concurrent-stream limit is declared dead only
+  when it stops answering.
 
 ## 5.2.0
 
