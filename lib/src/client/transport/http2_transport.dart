@@ -29,6 +29,7 @@ class Http2TransportStream extends GrpcTransportStream {
   final Stream<GrpcMessage> incomingMessages;
   final StreamController<List<int>> _outgoingMessages = StreamController();
   final ErrorHandler _onError;
+  late final StreamSubscription<StreamMessage> _outgoingSubscription;
 
   @override
   StreamSink<List<int>> get outgoingMessages => _outgoingMessages.sink;
@@ -41,16 +42,29 @@ class Http2TransportStream extends GrpcTransportStream {
   ) : incomingMessages = _transportStream.incomingMessages
           .transform(GrpcHttpDecoder(forResponse: true))
           .transform(grpcDecompressor(codecRegistry: codecRegistry)) {
-    _outgoingMessages.stream
+    _outgoingSubscription = _outgoingMessages.stream
         .map((payload) => frame(payload, compression))
         .map<StreamMessage>((bytes) => DataStreamMessage(bytes))
         .handleError(_onError)
         .listen(
-          _transportStream.outgoingMessages.add,
+          _send,
           onError: _transportStream.outgoingMessages.addError,
           onDone: _transportStream.outgoingMessages.close,
           cancelOnError: true,
         );
+  }
+
+  /// The HTTP/2 stream closes its own sink when its connection terminates or
+  /// the peer resets it, without telling this side: a message still on its way
+  /// from [outgoingMessages] then has nowhere to go. The call is already
+  /// failing through [incomingMessages], so the message is dropped rather than
+  /// raised as an uncaught error.
+  void _send(StreamMessage message) {
+    try {
+      _transportStream.outgoingMessages.add(message);
+    } on StateError {
+      _outgoingSubscription.cancel();
+    }
   }
 
   @override

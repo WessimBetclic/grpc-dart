@@ -10,6 +10,10 @@
   when it stops answering.
 - `ClientKeepAliveOptions.onPingTimeout` reports a keepalive timeout to the
   channel owner, which has no other way to observe one.
+- A request message still on its way to the HTTP/2 stream when the connection
+  terminates (or the peer resets the stream) is dropped instead of surfacing as
+  an uncaught `Bad state: Cannot add event after closing`; the call already
+  fails through its response stream.
 
 ## 5.2.0
 
