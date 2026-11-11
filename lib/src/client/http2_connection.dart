@@ -62,6 +62,12 @@ class Http2ClientConnection implements connection.ClientConnection {
 
   Duration? _currentReconnectDelay;
 
+  /// The keepalive of every transport still open, the abandoned ones included.
+  /// A transport is pinged until its socket closes or a ping goes unanswered,
+  /// so one that dies while draining fails its streams instead of hanging them.
+  final _keepAlives = <ClientTransportConnection, ClientKeepAlive>{};
+
+  /// The current transport's keepalive, assigned at each connect.
   ClientKeepAlive? keepAliveManager;
 
   Http2ClientConnection(Object host, int port, this.options)
@@ -86,7 +92,7 @@ class Http2ClientConnection implements connection.ClientConnection {
 
   Future<ClientTransportConnection> connectTransport() async {
     final connection = await _transportConnector.connect();
-    _transportConnector.done.then((_) => _abandonConnection());
+    _transportConnector.done.then((_) => _handleTransportDone(connection));
 
     // Give the settings settings-frame a bit of time to arrive.
     // TODO(sigurdm): This is a hack. The http2 package should expose a way of
@@ -132,14 +138,24 @@ class Http2ClientConnection implements connection.ClientConnection {
                 transport.terminate();
               },
             );
-            transport.onFrameReceived.listen(
-              (_) => keepAliveManager?.onFrameReceived(),
-            );
+            // Read back, since a subclass may substitute its own, and bound to
+            // this transport rather than to the connection's current keepalive:
+            // the connection replaces its transport while this one still
+            // carries streams, and data on the old transport must not count as
+            // the new one answering.
+            final keepAlive = keepAliveManager;
+            if (keepAlive != null) {
+              _keepAlives[transport] = keepAlive;
+              transport.onFrameReceived.listen(
+                (_) => keepAlive.onFrameReceived(),
+              );
+            }
           }
           _connectionLifeTimer
             ..reset()
             ..start();
-          transport.onActiveStateChanged = _handleActiveStateChanged;
+          transport.onActiveStateChanged = (isActive) =>
+              _handleActiveStateChanged(transport, isActive);
           _setState(ConnectionState.ready);
 
           if (_hasPendingCalls()) {
@@ -162,7 +178,6 @@ class Http2ClientConnection implements connection.ClientConnection {
         _connectionLifeTimer.elapsed > options.connectionTimeout;
     if (shouldRefresh) {
       _transportConnection!.finish();
-      keepAliveManager?.onTransportTermination();
     }
     if (!isHealthy || shouldRefresh) {
       _abandonConnection();
@@ -237,15 +252,17 @@ class Http2ClientConnection implements connection.ClientConnection {
   Future<void> shutdown() async {
     if (_state == ConnectionState.shutdown) return;
     _setShutdownState();
-    await _transportConnection?.finish();
-    keepAliveManager?.onTransportTermination();
+    final transport = _transportConnection;
+    await transport?.finish();
+    _stopKeepAlive(transport);
   }
 
   @override
   Future<void> terminate() async {
     _setShutdownState();
-    await _transportConnection?.terminate();
-    keepAliveManager?.onTransportTermination();
+    final transport = _transportConnection;
+    await transport?.terminate();
+    _stopKeepAlive(transport);
   }
 
   void _setShutdownState() {
@@ -263,10 +280,9 @@ class Http2ClientConnection implements connection.ClientConnection {
   void _handleIdleTimeout() {
     if (_timer == null || _state != ConnectionState.ready) return;
     _cancelTimer();
-    _transportConnection?.finish().catchError(
-      (_) {},
-    ); // TODO(jakobr): Log error.
-    keepAliveManager?.onTransportTermination();
+    final transport = _transportConnection;
+    transport?.finish().catchError((_) {}); // TODO(jakobr): Log error.
+    _stopKeepAlive(transport);
     _disconnect();
     _setState(ConnectionState.idle);
   }
@@ -276,17 +292,42 @@ class Http2ClientConnection implements connection.ClientConnection {
     _timer = null;
   }
 
-  void _handleActiveStateChanged(bool isActive) {
+  void _handleActiveStateChanged(
+    ClientTransportConnection transport,
+    bool isActive,
+  ) {
+    final keepAlive = _keepAlives[transport];
+    if (isActive) {
+      keepAlive?.onTransportActive();
+    } else {
+      keepAlive?.onTransportIdle();
+    }
+
+    // An abandoned transport running out of streams is its drain ending, not
+    // a reason to close the transport that replaced it. It is closed here
+    // rather than when abandoned: one abandoned at the peer's stream limit
+    // was never finished and would otherwise stay open, and pinged, for good,
+    // while a GOAWAY sent with its streams still running would race them.
+    if (!identical(transport, _transportConnection)) {
+      if (!isActive) transport.finish().ignore();
+      return;
+    }
     if (isActive) {
       _cancelTimer();
-      keepAliveManager?.onTransportActive();
-    } else {
-      if (options.idleTimeout != null) {
-        _timer ??= Timer(options.idleTimeout!, _handleIdleTimeout);
-      }
-      keepAliveManager?.onTransportIdle();
+    } else if (options.idleTimeout != null) {
+      _timer ??= Timer(options.idleTimeout!, _handleIdleTimeout);
     }
   }
+
+  /// The socket under [transport] closed. Only the current transport's loss
+  /// is the connection's: an abandoned transport closing is its drain ending.
+  void _handleTransportDone(ClientTransportConnection transport) {
+    _stopKeepAlive(transport);
+    if (identical(transport, _transportConnection)) _abandonConnection();
+  }
+
+  void _stopKeepAlive(ClientTransportConnection? transport) =>
+      _keepAlives.remove(transport)?.onTransportTermination();
 
   bool _hasPendingCalls() {
     // Get rid of pending calls that have timed out.
@@ -315,9 +356,10 @@ class Http2ClientConnection implements connection.ClientConnection {
     _connect();
   }
 
+  /// Detaches the current transport so the next call opens a new one. Its
+  /// streams and its keepalive run on until its socket closes.
   void _disconnect() {
     _transportConnection = null;
-    keepAliveManager?.onTransportTermination();
     keepAliveManager = null;
   }
 

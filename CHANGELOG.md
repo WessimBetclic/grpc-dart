@@ -14,6 +14,13 @@
   terminates (or the peer resets the stream) is dropped instead of surfacing as
   an uncaught `Bad state: Cannot add event after closing`; the call already
   fails through its response stream.
+- A transport the connection abandoned with streams still running (lifetime
+  exceeded, server GOAWAY, concurrent-stream limit) no longer drives the
+  transport that replaced it: its data no longer resets the new transport's
+  keepalive, its last stream ending no longer arms the connection's idle timer,
+  and its socket closing no longer abandons the new transport. It keeps its own
+  keepalive until its socket closes, so one that dies while draining fails its
+  streams instead of hanging them, and it is closed once its streams end.
 
 ## 5.1.0
 
