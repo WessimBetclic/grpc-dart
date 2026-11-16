@@ -14,6 +14,9 @@
   terminates (or the peer resets the stream) is dropped instead of surfacing as
   an uncaught `Bad state: Cannot add event after closing`; the call already
   fails through its response stream.
+- Allow `package:http2` 3.x. From 3.1.0 a client that cancels a call before its
+  response headers arrive ignores those headers instead of terminating the
+  whole connection with `PROTOCOL_ERROR` (dart-lang/http#1799).
 
 ## 5.1.0
 
